@@ -1,4 +1,5 @@
-// /src/pages/Messages.jsx
+// /src/pages/Messages.jsx - Adicione um estado para forçar re-render
+
 import { useState, useEffect, useRef } from "react";
 import { useComms } from "../context/CommsContext";
 import { ROLES } from "../data/constants";
@@ -10,28 +11,52 @@ export default function Messages({ users, currentUser }) {
     draft, 
     setDraft, 
     sendMessage, 
+    sendBroadcast,
     getConversation, 
     getUnreadCount,
     getRecentContacts,
     markAllAsRead,
-    clearDraft
+    clearDraft,
+    announcements,
+    getUnseenAnnouncements,
+    confirmAnnouncement,
+    replyToAnnouncement,
+    createAnnouncement,
+    dismissAnnouncement
   } = useComms();
   
   const [activeChat, setActiveChat] = useState(null);
   const [text, setText] = useState(draft || "");
   const [searchTerm, setSearchTerm] = useState("");
+  const [showBroadcast, setShowBroadcast] = useState(false);
+  const [broadcastText, setBroadcastText] = useState("");
+  const [broadcastTarget, setBroadcastTarget] = useState("all");
+  const [showAnnouncements, setShowAnnouncements] = useState(false);
+  const [announcementTitle, setAnnouncementTitle] = useState("");
+  const [announcementText, setAnnouncementText] = useState("");
+  const [announcementTarget, setAnnouncementTarget] = useState("all");
+  const [refreshKey, setRefreshKey] = useState(0); // Forçar re-render
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // Restaurar rascunho ao mudar de conversa
+  // Forçar atualização quando announcements mudar
+  useEffect(() => {
+    setRefreshKey(prev => prev + 1);
+  }, [announcements]);
+
+  // Forçar atualização quando messages mudar
+  useEffect(() => {
+    setRefreshKey(prev => prev + 1);
+  }, [messages]);
+
+  // Restaurar rascunho
   useEffect(() => {
     if (activeChat) {
-      const savedDraft = draft || "";
-      setText(savedDraft);
+      setText(draft || "");
     }
   }, [activeChat, draft]);
 
-  // Salvar rascunho automaticamente
+  // Salvar rascunho
   useEffect(() => {
     const timer = setTimeout(() => {
       if (text && text.trim()) {
@@ -43,67 +68,62 @@ export default function Messages({ users, currentUser }) {
     return () => clearTimeout(timer);
   }, [text, setDraft]);
 
-  // Scroll para o final das mensagens
+  // Scroll para o final
   useEffect(() => {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [messages, activeChat]);
+  }, [messages, activeChat, refreshKey]);
 
-  // Foco no textarea quando abrir conversa
+  // Foco no textarea
   useEffect(() => {
     if (activeChat && textareaRef.current) {
       setTimeout(() => textareaRef.current.focus(), 100);
     }
   }, [activeChat]);
 
+  // Verificar anúncios não visualizados
+  const unseenAnnouncements = getUnseenAnnouncements(currentUser.id);
+
   // Determinar com quem o usuário pode falar
   const getAvailableUsers = () => {
     let available = [];
     
     if (currentUser.role === ROLES.INSPECTOR) {
-      // Inspetor fala apenas com supervisores
       available = users.filter(u => 
         u.role === ROLES.SUPERVISOR || u.role === ROLES.ADMIN
       );
     } else if (currentUser.role === ROLES.SUPERVISOR) {
-      // Supervisor fala com inspetores e CEO
       available = users.filter(u => 
         u.role === ROLES.INSPECTOR || u.role === ROLES.CEO || u.role === ROLES.ADMIN
       );
     } else if (currentUser.role === ROLES.CEO) {
-      // CEO fala com supervisores
       available = users.filter(u => 
         u.role === ROLES.SUPERVISOR || u.role === ROLES.ADMIN
       );
     } else {
-      // Admin fala com todos
       available = users.filter(u => u.id !== currentUser.id);
     }
     
     return available;
   };
 
-  // Obter contatos recentes (com base nas conversas)
   const recentContacts = getRecentContacts(currentUser.id);
   const availableUsers = getAvailableUsers();
   
-  // Combinar contatos recentes com disponíveis
   const contactList = availableUsers.map(u => {
-    const recent = recentContacts.find(r => r.user?.id === u.id);
+    const recent = recentContacts.find(r => r?.contactId === u.id);
     return {
       user: u,
-      lastMessage: recent?.lastMessage || null,
+      lastMessage: recent || null,
       unread: getUnreadCount(u.id)
     };
   }).sort((a, b) => {
-    // Ordenar por não lidas primeiro, depois por última mensagem
     if (a.unread > 0 && b.unread === 0) return -1;
     if (a.unread === 0 && b.unread > 0) return 1;
     return new Date(b.lastMessage?.timestamp || 0) - new Date(a.lastMessage?.timestamp || 0);
   });
 
-  // Filtrar por busca
   const filteredContacts = contactList.filter(c => 
     c.user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     c.user.role.toLowerCase().includes(searchTerm.toLowerCase())
@@ -116,12 +136,54 @@ export default function Messages({ users, currentUser }) {
     sendMessage(currentUser.id, activeChat.id, text.trim());
     setText("");
     clearDraft();
-    
-    // Marcar mensagens como lidas ao enviar
     markAllAsRead(activeChat.id);
   };
 
-  // Tecla Enter para enviar (Shift+Enter para nova linha)
+  // Enviar broadcast
+  const handleBroadcast = () => {
+    if (!broadcastText.trim()) return;
+    
+    const targetRole = broadcastTarget === "all" ? null : broadcastTarget;
+    sendBroadcast(currentUser.id, broadcastText.trim(), targetRole);
+    setBroadcastText("");
+    setShowBroadcast(false);
+  };
+
+  // Criar anúncio
+  const handleCreateAnnouncement = () => {
+    if (!announcementTitle.trim() || !announcementText.trim()) return;
+    
+    const targetRole = announcementTarget === "all" ? null : announcementTarget;
+    createAnnouncement(currentUser.id, announcementTitle.trim(), announcementText.trim(), targetRole);
+    setAnnouncementTitle("");
+    setAnnouncementText("");
+    setShowAnnouncements(false);
+  };
+
+  // Confirmar anúncio (OK Recebido) - CORRIGIDO
+  const handleConfirmAnnouncement = (announcementId) => {
+    confirmAnnouncement(announcementId, currentUser.id);
+    // Forçar atualização imediata
+    setRefreshKey(prev => prev + 1);
+  };
+
+  // Responder anúncio - CORRIGIDO
+  const handleReplyAnnouncement = (announcementId) => {
+    const reply = prompt("Responder ao anúncio:", "");
+    if (reply !== null && reply.trim()) {
+      replyToAnnouncement(announcementId, currentUser.id, reply.trim());
+      // Marcar como visualizado após responder
+      dismissAnnouncement(announcementId, currentUser.id);
+      setRefreshKey(prev => prev + 1);
+    }
+  };
+
+  // Dispensar anúncio - CORRIGIDO
+  const handleDismissAnnouncement = (announcementId) => {
+    dismissAnnouncement(announcementId, currentUser.id);
+    setRefreshKey(prev => prev + 1);
+  };
+
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -129,21 +191,16 @@ export default function Messages({ users, currentUser }) {
     }
   };
 
-  // Selecionar conversa
   const handleSelectChat = (contact) => {
     setActiveChat(contact.user);
-    // Marcar mensagens como lidas
     markAllAsRead(contact.user.id);
-    // Restaurar rascunho
     setText(draft || "");
   };
 
-  // Obter mensagens da conversa atual
   const chatMessages = activeChat 
     ? getConversation(currentUser.id, activeChat.id)
     : [];
 
-  // Formatar hora
   const formatTime = (timestamp) => {
     const date = new Date(timestamp);
     const now = new Date();
@@ -155,7 +212,6 @@ export default function Messages({ users, currentUser }) {
     return date.toLocaleDateString("pt-PT", { day: "2-digit", month: "short" });
   };
 
-  // Agrupar mensagens por data
   const groupMessagesByDate = (msgs) => {
     const groups = {};
     msgs.forEach(msg => {
@@ -177,7 +233,7 @@ export default function Messages({ users, currentUser }) {
       border: "1px solid #E5E7EB", 
       overflow: "hidden"
     }}>
-      {/* Sidebar - Lista de contatos */}
+      {/* Sidebar */}
       <div style={{ 
         width: 280, 
         borderRight: "1px solid #E5E7EB", 
@@ -191,30 +247,116 @@ export default function Messages({ users, currentUser }) {
           borderBottom: "1px solid #E5E7EB",
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "center"
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 8
         }}>
           <span>💬 Conversas</span>
-          <span style={{ fontSize: 12, color: "#888" }}>
-            {contactList.filter(c => c.unread > 0).length} não lidas
-          </span>
+          <div style={{ display: "flex", gap: 6 }}>
+            {unseenAnnouncements.length > 0 && (
+              <span style={{ 
+                background: "#A32D2D", 
+                color: "white", 
+                borderRadius: 12, 
+                padding: "2px 10px", 
+                fontSize: 10,
+                fontWeight: 600
+              }}>
+                📢 {unseenAnnouncements.length}
+              </span>
+            )}
+            <span style={{ fontSize: 12, color: "#888" }}>
+              {contactList.filter(c => c.unread > 0).length} não lidas
+            </span>
+          </div>
         </div>
         
-        <div style={{ padding: "10px 12px" }}>
+        <div style={{ padding: "10px 12px", display: "flex", gap: 6, flexWrap: "wrap" }}>
           <input
             type="text"
             placeholder="🔍 Buscar contato..."
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
             style={{
-              width: "100%",
+              flex: 1,
               padding: "8px 12px",
               border: "1px solid #D1D5DB",
               borderRadius: 6,
               fontSize: 13,
-              outline: "none"
+              outline: "none",
+              minWidth: 100
             }}
           />
+          {(currentUser.role === ROLES.ADMIN || currentUser.role === ROLES.CEO || currentUser.role === ROLES.SUPERVISOR) && (
+            <button 
+              className="btn btn-sm btn-primary"
+              onClick={() => setShowBroadcast(!showBroadcast)}
+              style={{ padding: "6px 10px", fontSize: 12 }}
+            >
+              📢
+            </button>
+          )}
         </div>
+
+        {showBroadcast && (
+          <div style={{ 
+            padding: "12px", 
+            borderBottom: "1px solid #E5E7EB",
+            background: "#E6F1FB"
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>📢 Enviar Broadcast</div>
+            <textarea
+              placeholder="Mensagem para todos..."
+              value={broadcastText}
+              onChange={e => setBroadcastText(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "8px 10px",
+                border: "1px solid #D1D5DB",
+                borderRadius: 6,
+                fontSize: 13,
+                resize: "vertical",
+                minHeight: 50,
+                outline: "none",
+                fontFamily: "inherit"
+              }}
+            />
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <select
+                value={broadcastTarget}
+                onChange={e => setBroadcastTarget(e.target.value)}
+                style={{
+                  padding: "4px 8px",
+                  border: "1px solid #D1D5DB",
+                  borderRadius: 4,
+                  fontSize: 12,
+                  flex: 1
+                }}
+              >
+                <option value="all">Todos</option>
+                <option value={ROLES.INSPECTOR}>Inspetores</option>
+                <option value={ROLES.SUPERVISOR}>Supervisores</option>
+                <option value={ROLES.CEO}>CEO</option>
+                <option value={ROLES.ADMIN}>Admin</option>
+              </select>
+              <button 
+                className="btn btn-primary btn-sm"
+                onClick={handleBroadcast}
+                disabled={!broadcastText.trim()}
+                style={{ padding: "4px 12px", fontSize: 12 }}
+              >
+                Enviar
+              </button>
+              <button 
+                className="btn btn-sm btn-secondary"
+                onClick={() => setShowBroadcast(false)}
+                style={{ padding: "4px 8px", fontSize: 12 }}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
 
         <div style={{ flex: 1, overflowY: "auto" }}>
           {filteredContacts.length === 0 ? (
@@ -241,16 +383,6 @@ export default function Messages({ users, currentUser }) {
                   gap: 12,
                   transition: "background 0.2s",
                   position: "relative"
-                }}
-                onMouseEnter={(e) => {
-                  if (activeChat?.id !== contact.user.id) {
-                    e.currentTarget.style.background = "#F3F4F6";
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (activeChat?.id !== contact.user.id) {
-                    e.currentTarget.style.background = "transparent";
-                  }
                 }}
               >
                 <div style={{ 
@@ -302,7 +434,7 @@ export default function Messages({ users, currentUser }) {
                       maxWidth: 130,
                       fontWeight: contact.unread > 0 ? 500 : 400
                     }}>
-                      {contact.lastMessage?.text || `Clique para conversar com ${contact.user.name}`}
+                      {contact.lastMessage?.text || `Clique para conversar`}
                     </div>
                     {contact.unread > 0 && (
                       <span style={{
@@ -335,7 +467,6 @@ export default function Messages({ users, currentUser }) {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#fff" }}>
         {activeChat ? (
           <>
-            {/* Cabeçalho do chat */}
             <div style={{ 
               padding: "16px 20px", 
               borderBottom: "1px solid #E5E7EB", 
@@ -377,7 +508,6 @@ export default function Messages({ users, currentUser }) {
               </div>
             </div>
 
-            {/* Mensagens */}
             <div style={{ 
               flex: 1, 
               padding: "16px 20px", 
@@ -387,6 +517,59 @@ export default function Messages({ users, currentUser }) {
               flexDirection: "column",
               gap: 8
             }}>
+              {/* Anúncios não visualizados - CORRIGIDO */}
+              {unseenAnnouncements.length > 0 && (
+                <div style={{ 
+                  background: "#E6F1FB", 
+                  border: "1px solid #3B82F6",
+                  borderRadius: 8,
+                  padding: "12px 16px",
+                  marginBottom: 12
+                }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: "#1E2A3A" }}>
+                    📢 {unseenAnnouncements.length} anúncio(s) não visualizado(s)
+                  </div>
+                  {unseenAnnouncements.map(a => (
+                    <div key={a.id} style={{ 
+                      background: "white", 
+                      borderRadius: 6, 
+                      padding: "10px 14px", 
+                      marginTop: 8,
+                      border: "1px solid #E5E7EB"
+                    }}>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{a.title}</div>
+                      <div style={{ fontSize: 13, color: "#4B5563", marginTop: 4 }}>{a.text}</div>
+                      <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>
+                        {new Date(a.timestamp).toLocaleString("pt-PT")}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                        <button 
+                          className="btn btn-primary btn-sm"
+                          onClick={() => handleConfirmAnnouncement(a.id)}
+                          style={{ padding: "4px 14px", fontSize: 12 }}
+                        >
+                          ✅ OK Recebido
+                        </button>
+                        <button 
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => handleReplyAnnouncement(a.id)}
+                          style={{ padding: "4px 14px", fontSize: 12 }}
+                        >
+                          💬 Responder
+                        </button>
+                        <button 
+                          className="btn btn-sm btn-danger"
+                          onClick={() => handleDismissAnnouncement(a.id)}
+                          style={{ padding: "4px 10px", fontSize: 12 }}
+                        >
+                          ✕ Dispensar
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {Object.keys(groupedMessages).length === 0 ? (
                 <div style={{ 
                   flex: 1, 
@@ -418,6 +601,9 @@ export default function Messages({ users, currentUser }) {
                     </div>
                     {msgs.map(msg => {
                       const isOwn = msg.fromId === currentUser.id;
+                      const isBroadcast = msg.isBroadcast || msg.toId === 'broadcast';
+                      const isConfirmation = msg.isConfirmation;
+                      
                       return (
                         <div 
                           key={msg.id} 
@@ -429,8 +615,8 @@ export default function Messages({ users, currentUser }) {
                         >
                           <div style={{ maxWidth: "75%" }}>
                             <div style={{ 
-                              background: isOwn ? "#1E2A3A" : "#fff", 
-                              color: isOwn ? "#fff" : "#1F2937",
+                              background: isBroadcast ? "#FEF3C7" : (isOwn ? "#1E2A3A" : "#fff"),
+                              color: isBroadcast ? "#92400E" : (isOwn ? "#fff" : "#1F2937"),
                               padding: "10px 14px", 
                               borderRadius: 12, 
                               borderBottomRightRadius: isOwn ? 4 : 12,
@@ -440,6 +626,8 @@ export default function Messages({ users, currentUser }) {
                               wordWrap: "break-word",
                               boxShadow: isOwn ? "none" : "0 1px 2px rgba(0,0,0,0.05)"
                             }}>
+                              {isBroadcast && <span style={{ fontWeight: 600 }}>📢 </span>}
+                              {isConfirmation && <span style={{ fontWeight: 600 }}>✅ </span>}
                               {msg.text}
                             </div>
                             <div style={{ 
@@ -452,6 +640,7 @@ export default function Messages({ users, currentUser }) {
                               gap: 6,
                               justifyContent: isOwn ? "flex-end" : "flex-start"
                             }}>
+                              {isBroadcast && <span>📢 Broadcast</span>}
                               {formatTime(msg.timestamp)}
                               {isOwn && msg.read && (
                                 <span style={{ color: "#0F6E56" }}>✓✓ Lida</span>
@@ -470,7 +659,6 @@ export default function Messages({ users, currentUser }) {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input de mensagem */}
             <div style={{ 
               padding: "12px 16px", 
               borderTop: "1px solid #E5E7EB", 

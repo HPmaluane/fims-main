@@ -1,5 +1,4 @@
-// /src/pages/Dashboards.jsx - Corrigido
-
+// /src/pages/Dashboards.jsx
 import { jsPDF } from "jspdf";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import ScoreRing from "../components/ScoreRing";
@@ -9,7 +8,10 @@ import { calcScore, scoreLabel, getMonthlyTrend, getClientRisk, getTopBottomPerf
 import { ROLES, TEMPLATE_SECTIONS } from "../data/constants";
 import { useLang } from "../context/LangContext";
 import { useComms } from "../context/CommsContext";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+
+// Chave para localStorage dos avisos dispensados
+const DISMISSED_SYSTEM_ALERTS_KEY = "fims_dismissed_system_alerts";
 
 // Helper to calculate company-wide analytics
 function getCompanyAnalytics(inspections) {
@@ -18,7 +20,7 @@ function getCompanyAnalytics(inspections) {
   const issueMap = {};
 
   submitted.forEach(insp => {
-    if (!insp.items) return; // Adicionar verificação de segurança
+    if (!insp.items) return;
     insp.items.forEach(item => {
       if (item.score !== null) {
         const secName = TEMPLATE_SECTIONS.find(s => s.id === item.section_id)?.name || "Unknown";
@@ -45,11 +47,66 @@ function getCompanyAnalytics(inspections) {
   return { lowestCategories, commonIssues };
 }
 
+// ============================================================
+// CEO DASHBOARD
+// ============================================================
 export function CEODashboard({ inspections, locations, auditLogs, currentUser }) {
-  // UseComms agora com suporte a anúncios
-  const { announcements, createAnnouncement, dismissedAnn, dismissAnnouncement } = useComms();
+  const { announcements, createAnnouncement } = useComms();
   const [showAnnModal, setShowAnnModal] = useState(false);
   const [annText, setAnnText] = useState("");
+  
+  // Estado para avisos do sistema dispensados
+  const [dismissedAlerts, setDismissedAlerts] = useState(() => {
+    const saved = localStorage.getItem(DISMISSED_SYSTEM_ALERTS_KEY);
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Lista de avisos do sistema (estáticos + dinâmicos)
+  const [systemAlerts, setSystemAlerts] = useState(() => {
+    // Avisos fixos do sistema
+    const fixedAlerts = [
+      "O sistema está em revisão",
+      "O sistema está sobre revisão!"
+    ];
+    
+    // Adicionar avisos dos anúncios (que são avisos do sistema)
+    const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
+    const announcementAlerts = safeAnnouncements
+      .map(a => a.text)
+      .filter(text => text && typeof text === 'string' && text.trim().length > 0);
+    
+    // Combinar e remover duplicados
+    const allAlerts = [...fixedAlerts, ...announcementAlerts];
+    // Filtrar valores undefined/null e remover duplicados
+    return [...new Set(allAlerts.filter(alert => alert && typeof alert === 'string' && alert.trim().length > 0))];
+  });
+
+  // Filtrar avisos não dispensados - CORRIGIDO com verificação de segurança
+  const visibleAlerts = systemAlerts.filter((alert, index) => {
+    // Verificar se alert é válido
+    if (!alert || typeof alert !== 'string' || alert.trim().length === 0) {
+      return false;
+    }
+    const alertId = `alert_${index}_${alert.substring(0, 30)}`;
+    return !dismissedAlerts.includes(alertId);
+  });
+
+  // Função para dispensar aviso
+  const dismissSystemAlert = (alertText, index) => {
+    if (!alertText || typeof alertText !== 'string') return;
+    const alertId = `alert_${index}_${alertText.substring(0, 30)}`;
+    const newDismissed = [...dismissedAlerts, alertId];
+    setDismissedAlerts(newDismissed);
+    localStorage.setItem(DISMISSED_SYSTEM_ALERTS_KEY, JSON.stringify(newDismissed));
+  };
+
+  // Resetar avisos (admin/CEO)
+  const resetSystemAlerts = () => {
+    if (currentUser.role === ROLES.ADMIN || currentUser.role === ROLES.CEO) {
+      setDismissedAlerts([]);
+      localStorage.removeItem(DISMISSED_SYSTEM_ALERTS_KEY);
+    }
+  };
 
   const submitted = inspections.filter(i => ["submitted", "reviewed", "closed"].includes(i.status));
   const avgScore = submitted.length ? Math.round(submitted.reduce((s, i) => s + (i.score_pct || 0), 0) / submitted.length) : 0;
@@ -91,11 +148,6 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
     doc.save("FIMS-Executive-Summary.pdf");
   };
 
-  // Garantir que announcements é um array antes de usar filter
-  const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
-  const safeDismissedAnn = Array.isArray(dismissedAnn) ? dismissedAnn : [];
-  const activeAnnouncements = safeAnnouncements.filter(a => !safeDismissedAnn.some(d => d.annId === a.id && d.userId === currentUser.id));
-
   return (
     <div>
       <div className="page-header">
@@ -106,12 +158,71 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
         </div>
       </div>
 
-      {activeAnnouncements.map(ann => (
-        <div key={ann.id} className="alert-bar alert-info" style={{ justifyContent: "space-between" }}>
-          <div><strong>Aviso do Sistema:</strong> {ann.text}</div>
-          <button className="btn btn-secondary btn-sm" onClick={() => dismissAnnouncement(currentUser.id, ann.id)}>Ok, percebido</button>
+      {/* Avisos do Sistema - com persistência */}
+      {visibleAlerts.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          {visibleAlerts.map((alert, index) => (
+            <div 
+              key={`alert_${index}`}
+              className="alert-bar alert-info" 
+              style={{ 
+                justifyContent: "space-between",
+                backgroundColor: "#FEF3C7",
+                borderLeft: "3px solid #F59E0B",
+                borderRadius: 8,
+                padding: "12px 16px",
+                marginBottom: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 12
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>⚠️</span>
+                <span style={{ fontSize: 13, color: "#92400E" }}>
+                  <strong>Aviso do Sistema:</strong> {alert}
+                </span>
+              </div>
+              <button 
+                className="btn btn-secondary btn-sm" 
+                onClick={() => dismissSystemAlert(alert, index)}
+                style={{
+                  backgroundColor: "#F59E0B",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "4px 14px",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                OK Recebido
+              </button>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+
+      {/* Botão resetar avisos (apenas admin/CEO) */}
+      {(currentUser.role === ROLES.ADMIN || currentUser.role === ROLES.CEO) && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <button
+            onClick={resetSystemAlerts}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#888',
+              fontSize: 11,
+              cursor: 'pointer',
+              textDecoration: 'underline'
+            }}
+          >
+            Resetar avisos
+          </button>
+        </div>
+      )}
 
       <div className="metric-grid">
         <div className="metric-card"><div className="metric-label">Global Score</div><div className="metric-value" style={{ color: scoreLabel(avgScore).color }}>{avgScore}%</div></div>
@@ -149,7 +260,6 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
         </div>
       </div>
 
-      {/* NEW: Company Analytics */}
       <div className="two-col" style={{ marginBottom: 16 }}>
         <div className="card">
           <h3 style={{ fontSize: 15, marginBottom: 12, color: "#A32D2D" }}>Lowest Scoring Categories (Company-wide)</h3>
@@ -210,7 +320,18 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setShowAnnModal(false)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={() => { createAnnouncement(annText, currentUser.name); setShowAnnModal(false); setAnnText(""); }}>Publicar</button>
+              <button className="btn btn-primary" onClick={() => { 
+                if (annText && annText.trim()) {
+                  createAnnouncement(annText, currentUser.name); 
+                  // Adicionar ao sistema de avisos
+                  setSystemAlerts(prev => {
+                    const newAlerts = [...prev, annText.trim()];
+                    return [...new Set(newAlerts.filter(a => a && typeof a === 'string' && a.trim().length > 0))];
+                  });
+                }
+                setShowAnnModal(false); 
+                setAnnText(""); 
+              }}>Publicar</button>
             </div>
           </div>
         </div>
@@ -219,8 +340,47 @@ export function CEODashboard({ inspections, locations, auditLogs, currentUser })
   );
 }
 
+// ============================================================
+// SUPERVISOR DASHBOARD
+// ============================================================
 export function SupervisorDashboard({ inspections, users, currentUser, onView }) {
-  const { announcements, dismissedAnn, dismissAnnouncement } = useComms();
+  const { announcements } = useComms();
+  
+  // Estado para avisos do sistema dispensados
+  const [dismissedAlerts, setDismissedAlerts] = useState(() => {
+    const saved = localStorage.getItem(DISMISSED_SYSTEM_ALERTS_KEY);
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Lista de avisos do sistema
+  const [systemAlerts, setSystemAlerts] = useState(() => {
+    const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
+    const fixedAlerts = ["O sistema está em revisão", "O sistema está sobre revisão!"];
+    const announcementAlerts = safeAnnouncements
+      .map(a => a.text)
+      .filter(text => text && typeof text === 'string' && text.trim().length > 0);
+    const allAlerts = [...fixedAlerts, ...announcementAlerts];
+    return [...new Set(allAlerts.filter(alert => alert && typeof alert === 'string' && alert.trim().length > 0))];
+  });
+
+  // Filtrar avisos não dispensados - CORRIGIDO
+  const visibleAlerts = systemAlerts.filter((alert, index) => {
+    if (!alert || typeof alert !== 'string' || alert.trim().length === 0) {
+      return false;
+    }
+    const alertId = `alert_${index}_${alert.substring(0, 30)}`;
+    return !dismissedAlerts.includes(alertId);
+  });
+
+  // Função para dispensar aviso
+  const dismissSystemAlert = (alertText, index) => {
+    if (!alertText || typeof alertText !== 'string') return;
+    const alertId = `alert_${index}_${alertText.substring(0, 30)}`;
+    const newDismissed = [...dismissedAlerts, alertId];
+    setDismissedAlerts(newDismissed);
+    localStorage.setItem(DISMISSED_SYSTEM_ALERTS_KEY, JSON.stringify(newDismissed));
+  };
+
   const myInsp = inspections.filter(i => i.supervisor_id === currentUser.id || true);
   const teamCount = users.filter(u => u.role === ROLES.INSPECTOR).length;
   const pending = myInsp.filter(i => i.status === "pending" || i.status === "in_progress").length;
@@ -233,21 +393,52 @@ export function SupervisorDashboard({ inspections, users, currentUser, onView })
   const reviewList = myInsp.filter(i => i.status === "submitted").slice(0, 5);
   const criticalAlerts = myInsp.filter(i => i.alert_level === "critical" && !i.resolved).slice(0, 5);
   
-  // Garantir que announcements é um array
-  const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
-  const safeDismissedAnn = Array.isArray(dismissedAnn) ? dismissedAnn : [];
-  const activeAnnouncements = safeAnnouncements.filter(a => !safeDismissedAnn.some(d => d.annId === a.id && d.userId === currentUser.id));
-  
   const analytics = getCompanyAnalytics(inspections);
 
   return (
     <div>
       <div className="page-header"><div><div className="page-title">Welcome, {currentUser.name}</div><div className="page-sub">Supervisor Dashboard</div></div></div>
       
-      {activeAnnouncements.map(ann => (
-        <div key={ann.id} className="alert-bar alert-info" style={{ justifyContent: "space-between" }}>
-          <div><strong>Aviso:</strong> {ann.text}</div>
-          <button className="btn btn-secondary btn-sm" onClick={() => dismissAnnouncement(currentUser.id, ann.id)}>Ok</button>
+      {/* Avisos do Sistema - com persistência */}
+      {visibleAlerts.map((alert, index) => (
+        <div 
+          key={`alert_${index}`}
+          className="alert-bar alert-info" 
+          style={{ 
+            justifyContent: "space-between",
+            backgroundColor: "#FEF3C7",
+            borderLeft: "3px solid #F59E0B",
+            borderRadius: 8,
+            padding: "12px 16px",
+            marginBottom: 8,
+            display: "flex",
+            alignItems: "center",
+            gap: 12
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 18 }}>⚠️</span>
+            <span style={{ fontSize: 13, color: "#92400E" }}>
+              <strong>Aviso:</strong> {alert}
+            </span>
+          </div>
+          <button 
+            className="btn btn-secondary btn-sm" 
+            onClick={() => dismissSystemAlert(alert, index)}
+            style={{
+              backgroundColor: "#F59E0B",
+              color: "white",
+              border: "none",
+              borderRadius: 6,
+              padding: "4px 14px",
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer",
+              whiteSpace: "nowrap"
+            }}
+          >
+            OK Recebido
+          </button>
         </div>
       ))}
 
@@ -258,7 +449,6 @@ export function SupervisorDashboard({ inspections, users, currentUser, onView })
         <div className="metric-card"><div className="metric-label">Alerts</div><div className="metric-value" style={{ color: alerts ? "#A32D2D" : "#3B6D11" }}>{alerts}</div></div>
       </div>
 
-      {/* NEW: Company Analytics */}
       <div className="two-col" style={{ marginBottom: 16 }}>
         <div className="card">
           <h3 style={{ fontSize: 15, marginBottom: 12, color: "#A32D2D" }}>Lowest Scoring Categories (Company-wide)</h3>
@@ -319,9 +509,48 @@ export function SupervisorDashboard({ inspections, users, currentUser, onView })
   );
 }
 
+// ============================================================
+// INSPECTOR DASHBOARD
+// ============================================================
 export function InspectorDashboard({ inspections, users, currentUser, onStartInspection, onAcceptTask, onDeclineTask, onRequestLeave }) {
   const { t } = useLang();
-  const { announcements, dismissedAnn, dismissAnnouncement } = useComms();
+  const { announcements } = useComms();
+  
+  // Estado para avisos do sistema dispensados
+  const [dismissedAlerts, setDismissedAlerts] = useState(() => {
+    const saved = localStorage.getItem(DISMISSED_SYSTEM_ALERTS_KEY);
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Lista de avisos do sistema
+  const [systemAlerts, setSystemAlerts] = useState(() => {
+    const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
+    const fixedAlerts = ["O sistema está em revisão", "O sistema está sobre revisão!"];
+    const announcementAlerts = safeAnnouncements
+      .map(a => a.text)
+      .filter(text => text && typeof text === 'string' && text.trim().length > 0);
+    const allAlerts = [...fixedAlerts, ...announcementAlerts];
+    return [...new Set(allAlerts.filter(alert => alert && typeof alert === 'string' && alert.trim().length > 0))];
+  });
+
+  // Filtrar avisos não dispensados - CORRIGIDO
+  const visibleAlerts = systemAlerts.filter((alert, index) => {
+    if (!alert || typeof alert !== 'string' || alert.trim().length === 0) {
+      return false;
+    }
+    const alertId = `alert_${index}_${alert.substring(0, 30)}`;
+    return !dismissedAlerts.includes(alertId);
+  });
+
+  // Função para dispensar aviso
+  const dismissSystemAlert = (alertText, index) => {
+    if (!alertText || typeof alertText !== 'string') return;
+    const alertId = `alert_${index}_${alertText.substring(0, 30)}`;
+    const newDismissed = [...dismissedAlerts, alertId];
+    setDismissedAlerts(newDismissed);
+    localStorage.setItem(DISMISSED_SYSTEM_ALERTS_KEY, JSON.stringify(newDismissed));
+  };
+
   const myInsp = inspections.filter(i => i.inspector_id === currentUser.id && i.type !== "leave");
   const pendingAcceptance = myInsp.filter(i => i.status === "pending_acceptance");
   const assigned = myInsp.filter(i => i.status === "pending");
@@ -329,11 +558,6 @@ export function InspectorDashboard({ inspections, users, currentUser, onStartIns
   const recent = myInsp.filter(i => ["submitted", "reviewed", "closed"].includes(i.status));
   const today = new Date().toISOString().split("T")[0];
   const completedToday = recent.filter(i => i.date === today).length;
-  
-  // Garantir que announcements é um array
-  const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
-  const safeDismissedAnn = Array.isArray(dismissedAnn) ? dismissedAnn : [];
-  const activeAnnouncements = safeAnnouncements.filter(a => !safeDismissedAnn.some(d => d.annId === a.id && d.userId === currentUser.id));
 
   const handleDownloadPDF = () => {
     const doc = new jsPDF();
@@ -358,10 +582,46 @@ export function InspectorDashboard({ inspections, users, currentUser, onStartIns
         </div>
       </div>
 
-      {activeAnnouncements.map(ann => (
-        <div key={ann.id} className="alert-bar alert-info" style={{ justifyContent: "space-between" }}>
-          <div><strong>Aviso:</strong> {ann.text}</div>
-          <button className="btn btn-secondary btn-sm" onClick={() => dismissAnnouncement(currentUser.id, ann.id)}>Ok</button>
+      {/* Avisos do Sistema - com persistência */}
+      {visibleAlerts.map((alert, index) => (
+        <div 
+          key={`alert_${index}`}
+          className="alert-bar alert-info" 
+          style={{ 
+            justifyContent: "space-between",
+            backgroundColor: "#FEF3C7",
+            borderLeft: "3px solid #F59E0B",
+            borderRadius: 8,
+            padding: "12px 16px",
+            marginBottom: 8,
+            display: "flex",
+            alignItems: "center",
+            gap: 12
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 18 }}>⚠️</span>
+            <span style={{ fontSize: 13, color: "#92400E" }}>
+              <strong>Aviso:</strong> {alert}
+            </span>
+          </div>
+          <button 
+            className="btn btn-secondary btn-sm" 
+            onClick={() => dismissSystemAlert(alert, index)}
+            style={{
+              backgroundColor: "#F59E0B",
+              color: "white",
+              border: "none",
+              borderRadius: 6,
+              padding: "4px 14px",
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer",
+              whiteSpace: "nowrap"
+            }}
+          >
+            OK Recebido
+          </button>
         </div>
       ))}
 

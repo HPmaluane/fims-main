@@ -1,6 +1,6 @@
 // /src/pages/Login.jsx
 import { useState } from "react";
-import { SEED_USERS, ROLES } from "../data/constants";
+import { SEED_USERS } from "../data/constants";
 import { Icon } from "../lib/icons";
 import { authService } from "../services/authService";
 
@@ -20,7 +20,6 @@ export default function Login({ onLogin }) {
       if (useSeed) {
         const user = SEED_USERS.find(u => u.email === email);
         if (user && password === "fims2025") {
-          // Salvar no localStorage
           localStorage.setItem("fims_current_user", JSON.stringify(user));
           setLoading(false);
           onLogin(user);

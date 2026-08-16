@@ -19,13 +19,15 @@ import ScheduleModal from "./components/ScheduleModal";
 import RescheduleModal from "./components/RescheduleModal";
 import BulkScheduleModal from "./components/BulkScheduleModal";
 import { UsersPage, LocationsPage, ReportsPage, TemplatesPage, AuditPage, SettingsPage } from "./pages/Management";
-import { SEED_USERS, SEED_LOCATIONS, ROLES, getClientTemplate } from "./data/constants";
+import { SEED_USERS, SEED_LOCATIONS, ROLES } from "./data/constants";
 import { genSeedInspections, genId } from "./lib/helpers";
 import { exportToICS } from "./lib/icsExporter";
 import { LangProvider } from "./context/LangContext";
-import { CommsProvider, useComms } from "./context/CommsContext";
-import { getTemplateByClientName } from "./utils/excelTemplateImporter";
+import { CommsProvider } from "./context/CommsContext";
+import { getClientTemplate } from "./utils/excelTemplateImporter";
 import { authService } from "./services/authService";
+import { useComms } from "./context/CommsContext";
+
 
 // Chaves para localStorage
 const STORAGE_KEYS = {
@@ -213,10 +215,12 @@ function AppContent() {
   const [isInitialized, setIsInitialized] = useState(false);
 
   // --- PERSISTÊNCIA DE ESTADO ---
+  // Salvar página atual sempre que mudar (apenas se usuário logado)
   useEffect(() => {
-    // Salvar página atual
-    localStorage.setItem(STORAGE_KEYS.CURRENT_PAGE, page);
-  }, [page]);
+    if (currentUser && page) {
+      localStorage.setItem(STORAGE_KEYS.CURRENT_PAGE, page);
+    }
+  }, [page, currentUser]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.INSPECTIONS, JSON.stringify(inspections));
@@ -258,7 +262,7 @@ function AppContent() {
       try {
         const user = JSON.parse(savedUser);
         // Verificar se o usuário ainda existe na lista
-        const userExists = users.some(u => u.id === user.id && u.active);
+        const userExists = users.some(u => u.id === user.id && u.active !== false);
         if (!userExists) {
           // Usuário foi removido ou desativado
           localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
@@ -305,7 +309,7 @@ function AppContent() {
     // Restaurar página anterior ou ir para dashboard
     const savedPage = localStorage.getItem(STORAGE_KEYS.CURRENT_PAGE);
     // Se for página de login ou vazia, vai para dashboard
-    if (savedPage && savedPage !== "login") {
+    if (savedPage && savedPage !== "login" && savedPage !== "") {
       setPage(savedPage);
     } else {
       setPage("dashboard");
@@ -313,26 +317,21 @@ function AppContent() {
     addAuditLog(user, "Login", "login", "Entrou no sistema");
   };
 
-//  Atualizar a função handleLogout
-
-const handleLogout = () => {
-  if (currentUser) {
-    // Usar authService para logout
-    authService.logout(currentUser.id);
-    addAuditLog(currentUser, "Logout", "logout", "Saiu do sistema");
-  }
-  // Limpar todos os dados de sessão
-  localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-  localStorage.removeItem(STORAGE_KEYS.CURRENT_PAGE);
-  localStorage.removeItem(STORAGE_KEYS.EDITING_INSPECTION);
-  localStorage.removeItem(STORAGE_KEYS.VIEWING_INSPECTION);
-  setCurrentUser(null);
-  setPage("dashboard");
-  setEditingInspection(null);
-  setViewingInspection(null);
-};
-
- // Here
+  const handleLogout = async () => {
+    if (currentUser) {
+      await authService.logout(currentUser.id);
+      addAuditLog(currentUser, "Logout", "logout", "Saiu do sistema");
+    }
+    // Limpar todos os dados de sessão
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_PAGE);
+    localStorage.removeItem(STORAGE_KEYS.EDITING_INSPECTION);
+    localStorage.removeItem(STORAGE_KEYS.VIEWING_INSPECTION);
+    setCurrentUser(null);
+    setPage("dashboard");
+    setEditingInspection(null);
+    setViewingInspection(null);
+  };
 
   const handleNavigate = (p) => {
     setPage(p);

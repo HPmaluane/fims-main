@@ -1,3 +1,4 @@
+// /src/components/Topbar.jsx
 import { useState, useEffect } from "react";
 import { Icon } from "../lib/icons";
 import { useComms } from "../context/CommsContext";
@@ -20,6 +21,12 @@ export default function Topbar({ title, onMenuClick, onLogout, currentUser, onNa
   
   const myNotifs = notifications.filter(n => n.userId === currentUser.id && !n.read);
   const allMyNotifs = notifications.filter(n => n.userId === currentUser.id).slice(0, 10);
+
+  const handleLogoutClick = () => {
+    if (window.confirm('Tem certeza que deseja sair?')) {
+      onLogout();
+    }
+  };
 
   return (
     <div className="topbar">
@@ -50,11 +57,11 @@ export default function Topbar({ title, onMenuClick, onLogout, currentUser, onNa
             </div>
           )}
         </div>
-        <div className="icon-btn" onClick={onLogout} title="Logout">
+        <button className="icon-btn" onClick={handleLogoutClick} title="Logout">
           <Icon name="logout" size={15} />
-        </div>
+        </button>
         <div style={{ width: 30, height: 30, borderRadius: "50%", background: "#1E2A3A", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 600, color: "#fff" }}>
-          {currentUser.avatar}
+          {currentUser.avatar || currentUser.name?.substring(0, 2).toUpperCase() || 'US'}
         </div>
       </div>
     </div>

@@ -96,7 +96,6 @@ export function processExcelTemplates(file) {
 
 /**
  * Extrai o template de uma sheet do Excel
- * Versão mais eficiente
  */
 function extractTemplateFromSheet(sheetName, data) {
   if (!data || data.length < 3) return null;
@@ -107,7 +106,6 @@ function extractTemplateFromSheet(sheetName, data) {
     const row = data[i];
     if (row && row[0] && String(row[0]).trim().length > 0) {
       const firstCell = String(row[0]).trim();
-      // Verificar se não é cabeçalho de sistema
       if (!firstCell.includes('Relatório') && 
           !firstCell.includes('Sistemas') &&
           !firstCell.includes('DATA') &&
@@ -129,7 +127,6 @@ function extractTemplateFromSheet(sheetName, data) {
     if (!row || row.length === 0) continue;
     
     const firstCell = String(row[0] || '').trim().toUpperCase();
-    // Procurar por "PESSOAL DE LIMPEZAS" ou similar
     if (firstCell.includes('PESSOAL') || firstCell.includes('LIMPEZAS') || 
         firstCell.includes('EXTERIOR') || firstCell.includes('INTERIOR')) {
       startIndex = i;
@@ -137,7 +134,7 @@ function extractTemplateFromSheet(sheetName, data) {
     }
   }
   
-  // Processar linhas a partir do índice encontrado
+  // Processar linhas
   for (let i = startIndex; i < data.length; i++) {
     const row = data[i];
     if (!row || row.length === 0) continue;
@@ -160,7 +157,6 @@ function extractTemplateFromSheet(sheetName, data) {
     
     // Se for um cabeçalho de seção
     if (isSectionHeader(firstCell, fullRow)) {
-      // Salvar seção anterior
       if (currentSection && currentSection.items.length > 0) {
         sections.push(currentSection);
       }
@@ -177,13 +173,11 @@ function extractTemplateFromSheet(sheetName, data) {
     
     // Se estamos processando itens
     if (isProcessingItems && currentSection) {
-      // Verificar se é um item válido
       const isValidItem = isValidInspectionItem(firstCell, fullRow);
       
       if (isValidItem && firstCell.length > 5) {
         const label = cleanItemLabel(firstCell);
         
-        // Evitar duplicados e itens muito curtos
         if (label.length > 3) {
           const exists = currentSection.items.some(item => item.label === label);
           if (!exists) {
@@ -198,7 +192,6 @@ function extractTemplateFromSheet(sheetName, data) {
         }
       }
       
-      // Verificar se mudou para outra seção
       if (firstCell.includes('Pontuação') && !firstCell.includes('TOTAL')) {
         if (currentSection && currentSection.items.length > 0) {
           sections.push(currentSection);
@@ -209,15 +202,12 @@ function extractTemplateFromSheet(sheetName, data) {
     }
   }
   
-  // Adicionar última seção
   if (currentSection && currentSection.items.length > 0) {
     sections.push(currentSection);
   }
   
-  // Filtrar seções com itens
   sections = sections.filter(s => s.items && s.items.length > 0);
   
-  // Se não há seções, tentar criar uma seção padrão com todos os itens
   if (sections.length === 0) {
     const allItems = [];
     for (let i = startIndex; i < data.length; i++) {
@@ -245,9 +235,7 @@ function extractTemplateFromSheet(sheetName, data) {
     }
   }
   
-  // Gerar ID único para o cliente
   const clientId = `CLIENT_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
-  
   const totalItems = sections.reduce((sum, s) => sum + (s.items ? s.items.length : 0), 0);
   
   if (totalItems === 0) {
@@ -264,15 +252,11 @@ function extractTemplateFromSheet(sheetName, data) {
   };
 }
 
-/**
- * Verifica se o texto é um cabeçalho de seção
- */
 function isSectionHeader(text, fullRow) {
   if (!text) return false;
   
   const upperText = text.toUpperCase().trim();
   
-  // Cabeçalhos comuns
   const headers = [
     'PESSOAL DE LIMPEZAS', 'EXTERIOR', 'INTERIOR', 'GABINETES', 'CARPETE',
     'CHÃO', 'PAREDES', 'MÓVEIS', 'COPAS', 'CASAS DE BANHO', 'CORREDORES',
@@ -284,17 +268,14 @@ function isSectionHeader(text, fullRow) {
     'PESSOAL', 'LIMPEZAS', 'GABINETE', 'ELEVADOR'
   ];
   
-  // Verificar se é um cabeçalho conhecido
   for (const header of headers) {
     if (upperText.includes(header) || header.includes(upperText)) {
       return true;
     }
   }
   
-  // Se está em maiúsculas, tem mais de 3 palavras e não tem "?" é provavelmente seção
   const words = upperText.split(/\s+/).filter(w => w.length > 1);
   if (words.length >= 3 && upperText === upperText && !text.includes('?')) {
-    // Não deve ser um item de inspeção
     const itemKeywords = ['limpo', 'livre', 'regularmente', 'manchas', 'poeira', 'teias'];
     const hasKeyword = itemKeywords.some(kw => upperText.includes(kw.toUpperCase()));
     if (!hasKeyword) {
@@ -305,32 +286,21 @@ function isSectionHeader(text, fullRow) {
   return false;
 }
 
-/**
- * Limpa o título da seção
- */
 function cleanSectionTitle(text) {
   if (!text) return 'Geral';
-  
   let cleaned = text.replace(/^Pontuação\s*/i, '');
   cleaned = cleaned.replace(/^[-\s]+/, '');
   cleaned = cleaned.replace(/^[\d]+[\.\s]+/, '');
   cleaned = cleaned.trim();
-  
   return cleaned || 'Geral';
 }
 
-/**
- * Verifica se é um item de inspeção válido
- */
 function isValidInspectionItem(text, fullRow) {
   if (!text) return false;
   
   const cleaned = text.trim();
-  
-  // Ignorar se for muito curto ou vazio
   if (cleaned.length < 5) return false;
   
-  // Ignorar cabeçalhos comuns
   const ignorePatterns = [
     /^PONTUAÇÃO/i, /^TOTAL/i, /^DATA/i, /^Sistemas de pontos/i,
     /^Excelente/i, /^Acima da média/i, /^média/i, /^Deficiente/i,
@@ -353,23 +323,19 @@ function isValidInspectionItem(text, fullRow) {
     }
   }
   
-  // Verificar se tem palavras-chave de inspeção
   const keywords = ['limpo', 'livre', 'regularmente', 'manchas', 'poeira', 'teias', 
                     'limpos', 'estão', 'está', 'aspirado', 'varrido', 'lavado',
                     'polidos', 'limpas', 'limpeza', 'organizado'];
   const hasKeyword = keywords.some(kw => cleaned.toLowerCase().includes(kw));
   
-  // Se tem interrogação ou palavra-chave, é um item
   if (cleaned.includes('?') || hasKeyword) {
     return true;
   }
   
-  // Se tem "está" ou "estão" e não é muito curto
   if ((cleaned.includes('está') || cleaned.includes('estão')) && cleaned.length > 15) {
     return true;
   }
   
-  // Se tem mais de 20 caracteres, pode ser um item
   if (cleaned.length > 20) {
     return true;
   }
@@ -377,39 +343,21 @@ function isValidInspectionItem(text, fullRow) {
   return false;
 }
 
-/**
- * Limpa o label do item
- */
 function cleanItemLabel(text) {
   if (!text) return '';
   
   let cleaned = text.trim();
-  
-  // Remove números no início (ex: "1. ", "2. ", etc)
   cleaned = cleaned.replace(/^[\d]+[\.\s]+/, '');
-  
-  // Remove "?" no final
   cleaned = cleaned.replace(/\?$/, '');
-  
-  // Remove " - " no início
   cleaned = cleaned.replace(/^[-\s]+/, '');
-  
-  // Remove referências a peso
   cleaned = cleaned.replace(/[\(\[{]?\s*peso\s*[:=]\s*\d+\s*[\)\]}]?\s*/i, '');
-  
-  // Remove múltiplos espaços
   cleaned = cleaned.replace(/\s+/g, ' ');
-  
   return cleaned.trim();
 }
 
-/**
- * Extrai o peso da linha
- */
 function extractWeightFromRow(row) {
   if (!row) return 1;
   
-  // Procurar nas primeiras colunas por um número entre 1-5
   for (let i = 1; i < Math.min(row.length, 8); i++) {
     const cell = String(row[i] || '').trim();
     if (/^\d+$/.test(cell)) {
@@ -419,7 +367,6 @@ function extractWeightFromRow(row) {
       }
     }
   }
-  
   return 1;
 }
 
@@ -428,10 +375,8 @@ function extractWeightFromRow(row) {
  */
 export function saveTemplatesToStorage(templates) {
   try {
-    // Salvar templates completos
     localStorage.setItem('fims_templates', JSON.stringify(templates));
     
-    // Salvar lista de clientes
     const clientList = Object.keys(templates).map(key => {
       const t = templates[key];
       return {
@@ -444,7 +389,6 @@ export function saveTemplatesToStorage(templates) {
     });
     
     localStorage.setItem('fims_template_clients', JSON.stringify(clientList));
-    
     return clientList;
   } catch (error) {
     console.error('Erro ao salvar templates:', error);
@@ -467,9 +411,17 @@ export function loadTemplatesFromStorage() {
 }
 
 /**
- * Busca um template pelo nome do cliente
+ * Busca um template pelo nome do cliente (ALIAS para getClientTemplate)
  */
 export function getTemplateByClientName(clientName) {
+  return getClientTemplate(clientName);
+}
+
+/**
+ * Busca um template pelo nome do cliente - FUNÇÃO PRINCIPAL
+ * Esta é a função usada pelo App.jsx
+ */
+export function getClientTemplate(clientName) {
   try {
     const templates = JSON.parse(localStorage.getItem('fims_templates') || '{}');
     
